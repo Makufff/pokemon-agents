@@ -4,6 +4,7 @@ from cg.api import all_card_data, to_observation_class, AreaType, OptionType
 CARD_COUNT = 1268  # max cardId + 1
 SLOT_FEATURES = 40
 MAX_ACTIONS = 64   # max candidate actions enumerated per decision
+_MAX_HP = 400.0
 
 # Load card metadata once at import time
 _all_cards = all_card_data()
@@ -21,14 +22,16 @@ def _encode_slot(poke, is_active: bool, ps: dict) -> np.ndarray:
         feat[0] = 1.0
         return feat
 
-    feat[1] = poke['hp'] / 400.0
-    feat[2] = (poke['maxHp'] - poke['hp']) / 400.0
+    hp = poke.get('hp', 0)
+    max_hp = poke.get('maxHp', _MAX_HP) or _MAX_HP  # guard against 0
+    feat[1] = hp / _MAX_HP
+    feat[2] = (max_hp - hp) / _MAX_HP
     feat[3] = float(poke.get('appearThisTurn', False))
 
     for e in poke.get('energies', []):
-        idx = 4 + int(e)
-        if 4 <= idx < 16:
-            feat[idx] += 0.1
+        e_type = int(e)
+        if 0 <= e_type <= 11:  # energy types 0-11 map to feat[4..15]
+            feat[4 + e_type] += 0.1
 
     feat[16] = min(len(poke.get('energyCards', [])) / 5.0, 1.0)
     feat[17] = min(len(poke.get('tools', [])) / 3.0, 1.0)
@@ -88,6 +91,7 @@ def encode_sets(obs: dict, your_index: int, your_deck: list[int]) -> tuple[list[
     hand_ids = [c['id'] for c in hand]
     discard_ids = [c['id'] for c in ps.get('discard', [])]
     deck_count = ps.get('deckCount', 0)
+    # Approximation: assumes draws come from end of deck; actual order unknown
     deck_ids = your_deck[:deck_count]
     return hand_ids, discard_ids, deck_ids
 
@@ -104,8 +108,8 @@ def encode_scalars(obs: dict, your_index: int) -> np.ndarray:
         float(state.get('firstPlayer', -1) == your_index),
         float(state.get('supporterPlayed', False)),
         float(state.get('energyAttached', False)),
-        len(your_ps.get('prize', [])) / 6.0,
-        len(opp_ps.get('prize', [])) / 6.0,
+        len(your_ps.get('prize', [])) / 3.0,
+        len(opp_ps.get('prize', [])) / 3.0,
         your_ps.get('deckCount', 0) / 60.0,
         opp_ps.get('deckCount', 0) / 60.0,
     ], dtype=np.float32)
@@ -198,18 +202,21 @@ def enumerate_actions(obs: dict) -> list[list[int]]:
 
     # Multi-select: enumerate combinations greedily up to MAX_ACTIONS
     actions = []
-    indices = list(range(max_count))
+    actual_count = min(max_count, n_opts)
+    if actual_count < min_count:
+        return [list(range(n_opts))]  # take all available options
+    indices = list(range(actual_count))
     while len(actions) < MAX_ACTIONS:
         if all(i < n_opts for i in indices):
             actions.append(indices.copy())
         # Increment in combinatorial order
-        for pos in range(max_count - 1, -1, -1):
-            if indices[pos] < n_opts - (max_count - pos):
+        for pos in range(actual_count - 1, -1, -1):
+            if indices[pos] < n_opts - (actual_count - pos):
                 indices[pos] += 1
-                for j in range(pos + 1, max_count):
+                for j in range(pos + 1, actual_count):
                     indices[j] = indices[j - 1] + 1
                 break
         else:
             break
 
-    return actions if actions else [[0]]
+    return actions if actions else [list(range(min(min_count, n_opts)))]
