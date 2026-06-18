@@ -21,7 +21,7 @@ def _get_first_real_obs():
         n_opts = len(obs['select']['option']) if obs.get('select') else 1
         max_count = obs['select']['maxCount'] if obs.get('select') else 1
         import random
-        action = random.sample(range(n_opts), max_count)
+        action = random.sample(range(n_opts), min(max_count, n_opts))
         obs, done, _ = env.step(action)
         if done:
             break

@@ -10,25 +10,28 @@ _all_cards = all_card_data()
 CARD_TABLE = {c.cardId: c for c in _all_cards}
 
 
-def _encode_slot(poke, is_active: bool, ps_special: dict) -> np.ndarray:
-    """Encode a single board slot (Pokemon or empty) as a 40-float vector."""
+def _encode_slot(poke, is_active: bool, ps: dict) -> np.ndarray:
+    """Encode a single board slot as a 40-float vector.
+
+    is_active: True if this is the Active Spot (status conditions apply)
+    ps: PlayerState dict (used to read status conditions for active slot)
+    """
     feat = np.zeros(SLOT_FEATURES, dtype=np.float32)
     if poke is None:
-        feat[0] = 1.0  # is_empty
+        feat[0] = 1.0
         return feat
 
     feat[1] = poke['hp'] / 400.0
-    max_hp = poke['maxHp']
-    feat[2] = (max_hp - poke['hp']) / 400.0
+    feat[2] = (poke['maxHp'] - poke['hp']) / 400.0
     feat[3] = float(poke.get('appearThisTurn', False))
 
     for e in poke.get('energies', []):
         idx = 4 + int(e)
-        if idx < 16:
+        if 4 <= idx < 16:
             feat[idx] += 0.1
 
-    feat[16] = len(poke.get('energyCards', [])) / 5.0
-    feat[17] = len(poke.get('tools', [])) / 3.0
+    feat[16] = min(len(poke.get('energyCards', [])) / 5.0, 1.0)
+    feat[17] = min(len(poke.get('tools', [])) / 3.0, 1.0)
 
     card = CARD_TABLE.get(poke['id'])
     if card:
@@ -40,7 +43,16 @@ def _encode_slot(poke, is_active: bool, ps_special: dict) -> np.ndarray:
         feat[23] = float(card.stage2)
         feat[24] = card.retreatCost / 5.0
 
-    feat[25] = len(poke.get('preEvolution', [])) / 3.0
+    feat[25] = min(len(poke.get('preEvolution', [])) / 3.0, 1.0)
+
+    # Status conditions — only active slot has them (from PlayerState)
+    if is_active:
+        feat[26] = float(ps.get('poisoned', False))
+        feat[27] = float(ps.get('burned', False))
+        feat[28] = float(ps.get('asleep', False))
+        feat[29] = float(ps.get('paralyzed', False))
+        feat[30] = float(ps.get('confused', False))
+
     return feat
 
 
@@ -58,13 +70,13 @@ def encode_board(obs: dict, your_index: int) -> np.ndarray:
         # Active slot
         active_list = ps.get('active', [])
         active = active_list[0] if active_list else None
-        board[slot] = _encode_slot(active, is_active=True, ps_special=ps)
+        board[slot] = _encode_slot(active, is_active=True, ps=ps)
         slot += 1
         # Bench slots (up to 5)
         bench = ps.get('bench', [])
         for j in range(5):
             poke = bench[j] if j < len(bench) else None
-            board[slot] = _encode_slot(poke, is_active=False, ps_special=ps)
+            board[slot] = _encode_slot(poke, is_active=False, ps=ps)
             slot += 1
     return board
 
@@ -88,7 +100,7 @@ def encode_scalars(obs: dict, your_index: int) -> np.ndarray:
     opp_ps = state['players'][opp_index]
 
     scalars = np.array([
-        state['turn'] / 10.0,
+        min(state['turn'] / 30.0, 1.0),  # normalized turn, capped at 1.0
         float(state.get('firstPlayer', -1) == your_index),
         float(state.get('supporterPlayed', False)),
         float(state.get('energyAttached', False)),
@@ -123,8 +135,9 @@ def encode_option(opt: dict, obs: dict, your_index: int) -> tuple[int, int]:
                 idx = opt.get('index', 0)
                 pi = opt.get('playerIndex', your_index)
                 card_id = _card_id_from_area(obs, area, idx, pi)
-            case 13:  # ATTACK — use attackId as proxy (clamped)
-                card_id = min(opt.get('attackId', 0), CARD_COUNT - 1)
+            case 13:  # ATTACK — encode the attacking Pokemon's card ID
+                active = ps.get('active', [])
+                card_id = active[0]['id'] if active else 0
     except (IndexError, KeyError, TypeError):
         card_id = 0
 
@@ -157,6 +170,9 @@ def _card_id_from_area(obs: dict, area: int | None, index: int, player_index: in
             case 7:  # STADIUM
                 stadium = state.get('stadium', [])
                 return stadium[index]['id'] if index < len(stadium) else 0
+            case 1:  # DECK — cards visible during deck-search effects
+                deck_list = (obs.get('select') or {}).get('deck') or []
+                return deck_list[index]['id'] if index < len(deck_list) else 0
             case _:
                 return 0
     except (IndexError, KeyError, TypeError):
