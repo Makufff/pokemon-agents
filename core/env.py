@@ -13,6 +13,7 @@ class PTCGEnv:
 
     def __init__(self):
         self._your_index = 0
+        self._battle_active = False
 
     def reset(self, deck0: list[int], deck1: list[int], your_index: int = 0) -> dict:
         """Start a new game. Returns the first observation dict."""
@@ -21,6 +22,7 @@ class PTCGEnv:
         if start_data.errorPlayer >= 0:
             msg = self._ERROR_MSGS.get(start_data.errorType, "unknown deck error")
             raise ValueError(f"Player {start_data.errorPlayer} deck error: {msg}")
+        self._battle_active = True
         return obs
 
     def step(self, action: list[int]) -> tuple[dict, bool, dict]:
@@ -32,8 +34,12 @@ class PTCGEnv:
         obs = battle_select(action)
         result = obs['current']['result']
         done = result >= 0
+        if done:
+            self._battle_active = False
         return obs, done, {'result': result, 'your_index': self._your_index}
 
     def close(self):
-        """Free game memory."""
-        battle_finish()
+        """Free game memory. Safe to call multiple times."""
+        if self._battle_active:
+            battle_finish()
+            self._battle_active = False

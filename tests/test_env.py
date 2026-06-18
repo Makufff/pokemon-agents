@@ -38,3 +38,9 @@ def test_bad_deck_raises():
     with pytest.raises(ValueError):
         env.reset(bad_deck, bad_deck)
     env.close()
+
+def test_close_is_idempotent():
+    env = PTCGEnv()
+    env.reset(SAMPLE_DECK, SAMPLE_DECK)
+    env.close()
+    env.close()  # Must not crash
