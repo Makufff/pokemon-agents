@@ -57,6 +57,6 @@ def compute_kl_loss(
         _, teacher_scores = teacher(board, hand_t, discard_t, deck_t, scalars, opt_types, opt_cards)
 
     new_log_probs = F.log_softmax(new_scores, dim=0)
-    teacher_log_probs = F.log_softmax(teacher_scores, dim=0)
-    teacher_probs = teacher_log_probs.exp()
+    teacher_probs = F.softmax(teacher_scores, dim=0)
+    teacher_log_probs = teacher_probs.log()
     return (teacher_probs * (teacher_log_probs - new_log_probs)).sum()
