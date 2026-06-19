@@ -296,6 +296,8 @@ def train_step(
         opt_types = torch.tensor(sample.opt_types, dtype=torch.long, device=device)
         opt_cards = torch.tensor(sample.opt_cards, dtype=torch.long, device=device)
 
+        # oracle (opp_hand_ids) not passed here — dmc train_step is Phase 1 only.
+        # Oracle training happens in Phase 2 via train/league.py ppo_train_step.
         value, scores = model(board, hand_t, discard_t, deck_t, scalars, opt_types, opt_cards)
 
         v_target = torch.tensor([[sample.td_value]], dtype=torch.float32, device=device)

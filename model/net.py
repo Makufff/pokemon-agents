@@ -57,7 +57,8 @@ class PolicyValueNet(nn.Module):
 
         # Oracle branch: opponent's hand cards (training only; zeroed at inference).
         # padding_idx=0 ensures an all-zero input tensor produces a zero embedding,
-        # so passing None (→ dummy zeros) is identical to passing an all-zero oracle.
+        # Oracle: opponent's hand (training only). padding_idx=0 means any all-zero
+        # input of any length produces the zero vector, so None oracle = zero oracle.
         # NOTE: Phase 1 checkpoints are NOT compatible with this value head.
         self.oracle_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
 

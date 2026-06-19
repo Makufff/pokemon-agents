@@ -46,7 +46,7 @@ def test_different_option_counts():
         _, scores = net(*inputs)
         assert scores.shape == (n,), f"n={n} scores shape {scores.shape}"
 
-def test_oracle_input_changes_value():
+def test_oracle_does_not_affect_scores():
     net = PolicyValueNet()
     board = torch.zeros(1, 12, 40)
     hand_ids = torch.zeros(1, 10, dtype=torch.long)
