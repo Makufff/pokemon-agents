@@ -45,3 +45,36 @@ def test_different_option_counts():
         inputs = _dummy_inputs(n)
         _, scores = net(*inputs)
         assert scores.shape == (n,), f"n={n} scores shape {scores.shape}"
+
+def test_oracle_input_changes_value():
+    net = PolicyValueNet()
+    board = torch.zeros(1, 12, 40)
+    hand_ids = torch.zeros(1, 10, dtype=torch.long)
+    discard_ids = torch.zeros(1, 10, dtype=torch.long)
+    deck_ids = torch.zeros(1, 60, dtype=torch.long)
+    scalars = torch.zeros(1, 8)
+    opt_types = torch.zeros(3, dtype=torch.long)
+    opt_cards = torch.zeros(3, dtype=torch.long)
+    opp_hand = torch.tensor([[677, 678, 1079]], dtype=torch.long)
+
+    v_no_oracle, _ = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards)
+    v_oracle, _    = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards, opp_hand)
+    _, s_no = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards)
+    _, s_or = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards, opp_hand)
+    assert torch.allclose(s_no, s_or), "Oracle must NOT change policy scores"
+    assert v_no_oracle.shape == (1, 1)
+    assert v_oracle.shape == (1, 1)
+
+def test_none_oracle_matches_zero_oracle():
+    net = PolicyValueNet()
+    board = torch.zeros(1, 12, 40)
+    hand_ids = torch.zeros(1, 10, dtype=torch.long)
+    discard_ids = torch.zeros(1, 10, dtype=torch.long)
+    deck_ids = torch.zeros(1, 60, dtype=torch.long)
+    scalars = torch.zeros(1, 8)
+    opt_types = torch.zeros(3, dtype=torch.long)
+    opt_cards = torch.zeros(3, dtype=torch.long)
+    zero_oracle = torch.zeros(1, 5, dtype=torch.long)
+    v_none, _ = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards, None)
+    v_zero, _ = net(board, hand_ids, discard_ids, deck_ids, scalars, opt_types, opt_cards, zero_oracle)
+    assert torch.allclose(v_none, v_zero, atol=1e-5), "None oracle must equal all-zero oracle"

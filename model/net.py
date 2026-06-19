@@ -55,6 +55,12 @@ class PolicyValueNet(nn.Module):
         self.discard_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
         self.deck_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
 
+        # Oracle branch: opponent's hand cards (training only; zeroed at inference).
+        # padding_idx=0 ensures an all-zero input tensor produces a zero embedding,
+        # so passing None (→ dummy zeros) is identical to passing an all-zero oracle.
+        # NOTE: Phase 1 checkpoints are NOT compatible with this value head.
+        self.oracle_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
+
         # Trunk
         self.trunk = nn.Sequential(
             nn.Linear(COMBINED_DIM, TRUNK_DIM),
@@ -63,9 +69,9 @@ class PolicyValueNet(nn.Module):
             nn.ReLU(),
         )
 
-        # Value head
+        # Value head (takes trunk + oracle embedding as input)
         self.value_head = nn.Sequential(
-            nn.Linear(TRUNK_DIM, D_VALUE_HIDDEN),
+            nn.Linear(TRUNK_DIM + D_SETS, D_VALUE_HIDDEN),
             nn.ReLU(),
             nn.Linear(D_VALUE_HIDDEN, 1),
             nn.Tanh(),
@@ -110,11 +116,24 @@ class PolicyValueNet(nn.Module):
         scalars: torch.Tensor,       # [B, 8]
         opt_types: torch.Tensor,     # [N] option type IDs
         opt_cards: torch.Tensor,     # [N] option card IDs
+        opp_hand_ids: torch.Tensor | None = None,  # [B, max_opp_hand] or None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns (value [B,1], scores [N])."""
+        """Returns (value [B,1], scores [N]).
+
+        opp_hand_ids: opponent hand card IDs for oracle training signal.
+            Pass None (or all-zeros) at inference time to zero out the oracle.
+            padding_idx=0 guarantees None → zeros → zero embedding.
+        """
         assert board.size(0) == 1, "PolicyValueNet.forward requires batch size 1"
         trunk = self._encode_state(board, hand_ids, discard_ids, deck_ids, scalars)
-        value = self.value_head(trunk)  # [B, 1]
+
+        # Oracle embedding: zero when None (inference), non-zero during training
+        if opp_hand_ids is None:
+            oracle_emb = self.oracle_embed(torch.zeros(1, 1, dtype=torch.long, device=board.device))
+        else:
+            oracle_emb = self.oracle_embed(opp_hand_ids)  # [B, D_SETS]
+
+        value = self.value_head(torch.cat([trunk, oracle_emb], dim=-1))  # [B, 1]
 
         # Option embeddings
         type_emb = self.opt_type_embed(opt_types)   # [N, 16]
