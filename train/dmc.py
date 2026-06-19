@@ -199,67 +199,68 @@ def mcts_step(obs_dict: dict, your_deck: list[int], model: PolicyValueNet,
         for a, p in zip(root_actions, root_probs)
     ])
 
-    # MCTS simulations
-    for _ in range(search_count):
-        node = root
-        path: list[tuple] = []  # (parent_node, child)
+    try:
+        # MCTS simulations
+        for _ in range(search_count):
+            node = root
+            path: list[tuple] = []  # (parent_node, child)
 
-        # Selection + expansion
-        while True:
-            best_child = max(
-                node.children,
-                key=lambda c: (
-                    (c.node.total / c.node.visit if c.node else node.total / node.visit)
-                    + PUCT_C * math.sqrt(node.visit) * c.prob / (1 + (c.node.visit if c.node else 0))
-                )
-            )
-            if best_child.node is None:
-                # Expand
-                try:
-                    next_state = search_step(best_child.search_id, best_child.action)
-                    next_obs = _obs_class_to_dict(next_state.observation)
-                    child_v, child_actions, child_probs, _ = _eval_obs(
-                        next_obs, your_index, your_deck, model, device
-                    )
-                    child_node = _Node(value=child_v, total=child_v, visit=1,
-                                       children=[
-                                           _Child(action=a, prob=p, node=None,
-                                                  search_id=next_state.searchId)
-                                           for a, p in zip(child_actions, child_probs)
-                                       ])
-                    best_child.node = child_node
-                    v = child_v
-                except Exception:
-                    v = 0.0
-                # Backprop
-                for parent, _ in path:
-                    parent.total += v
-                    parent.visit += 1
-                break
-            else:
-                path.append((node, best_child))
-                node = best_child.node
+            # Selection + expansion
+            while True:
                 if not node.children:
                     v = node.value
                     for parent, _ in path:
                         parent.total += v
                         parent.visit += 1
                     break
+                best_child = max(
+                    node.children,
+                    key=lambda c: (
+                        (c.node.total / c.node.visit if c.node else 0.0)
+                        + PUCT_C * math.sqrt(node.visit) * c.prob / (1 + (c.node.visit if c.node else 0))
+                    )
+                )
+                if best_child.node is None:
+                    # Expand
+                    try:
+                        next_state = search_step(best_child.search_id, best_child.action)
+                        next_obs = _obs_class_to_dict(next_state.observation)
+                        child_v, child_actions, child_probs, _ = _eval_obs(
+                            next_obs, your_index, your_deck, model, device
+                        )
+                        child_node = _Node(value=child_v, total=child_v, visit=1,
+                                           children=[
+                                               _Child(action=a, prob=p, node=None,
+                                                      search_id=next_state.searchId)
+                                               for a, p in zip(child_actions, child_probs)
+                                           ])
+                        best_child.node = child_node
+                        v = child_v
+                    except Exception:
+                        v = 0.0
+                    # Backprop
+                    for parent, _ in path:
+                        parent.total += v
+                        parent.visit += 1
+                    break
+                else:
+                    path.append((node, best_child))
+                    node = best_child.node
 
-    search_end()
+        # Select most-visited child
+        best = max(root.children, key=lambda c: c.node.visit if c.node else 0)
+        best_idx = root.children.index(best)
 
-    # Select most-visited child
-    best = max(root.children, key=lambda c: c.node.visit if c.node else 0)
-    best_idx = root.children.index(best)
+        total_visits = sum(c.node.visit for c in root.children if c.node) or 1
+        root_sample.action_idx = best_idx
+        root_sample.mcts_policy = [
+            (c.node.visit / total_visits if c.node else 0.0) for c in root.children
+        ]
+        root_sample.td_value = root.total / root.visit
 
-    total_visits = sum(c.node.visit for c in root.children if c.node) or 1
-    root_sample.action_idx = best_idx
-    root_sample.mcts_policy = [
-        (c.node.visit / total_visits if c.node else 0.0) for c in root.children
-    ]
-    root_sample.td_value = root.total / root.visit
-
-    return best.action, root_sample
+        return best.action, root_sample
+    finally:
+        search_end()
 
 
 def apply_td_lambda(
@@ -272,9 +273,8 @@ def apply_td_lambda(
     terminal = 1.0 if result == your_index else (-1.0 if result != 2 else 0.0)
     value = terminal
     for sample in reversed(samples):
-        mixed = (value + sample.td_value) * 0.5
-        value = value * lam + sample.td_value * (1.0 - lam)
-        sample.td_value = mixed
+        value = lam * value + (1.0 - lam) * sample.td_value
+        sample.td_value = value
 
 
 def train_step(
@@ -285,7 +285,7 @@ def train_step(
 ) -> float:
     """One gradient step on a batch. Returns loss as float."""
     model.train()
-    total_loss = torch.tensor(0.0, device=device, requires_grad=False)
+    losses = []
 
     for sample in batch:
         board = torch.tensor(sample.board, device=device).unsqueeze(0)
@@ -305,9 +305,9 @@ def train_step(
         log_probs = F.log_softmax(scores, dim=0)
         loss_p = -(policy_target * log_probs).sum()
 
-        total_loss = total_loss + loss_v + loss_p
+        losses.append(loss_v + loss_p)
 
-    total_loss = total_loss / len(batch)
+    total_loss = torch.stack(losses).mean()
     optimizer.zero_grad()
     total_loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
