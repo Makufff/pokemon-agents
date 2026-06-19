@@ -14,6 +14,9 @@ TRUNK_DIM = 256
 SCALAR_DIM = 8
 # Combined: RESNET_CHANNELS + 3*D_SETS + SCALAR_DIM = 128+384+8 = 520
 COMBINED_DIM = RESNET_CHANNELS + 3 * D_SETS + SCALAR_DIM
+D_VALUE_HIDDEN = 64      # value head hidden size
+D_OPT_TYPE_EMBED = 16   # option type embedding dim
+D_OPT_PROJ = 64         # option projection output dim
 
 
 class _ResBlock(nn.Module):
@@ -47,7 +50,7 @@ class PolicyValueNet(nn.Module):
         self.board_proj = nn.Conv1d(SLOT_FEATURES, RESNET_CHANNELS, kernel_size=1)
         self.resblocks = nn.ModuleList([_ResBlock(RESNET_CHANNELS) for _ in range(NUM_RESBLOCKS)])
 
-        # Set branches (EmbeddingBag with mean pooling; padding_idx=0 ignored)
+        # Set branches: EmbeddingBag with mean pooling. Card ID 0 is reserved as padding/unknown.
         self.hand_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
         self.discard_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
         self.deck_embed = nn.EmbeddingBag(CARD_COUNT, D_SETS, mode='mean', padding_idx=0)
@@ -62,19 +65,19 @@ class PolicyValueNet(nn.Module):
 
         # Value head
         self.value_head = nn.Sequential(
-            nn.Linear(TRUNK_DIM, 64),
+            nn.Linear(TRUNK_DIM, D_VALUE_HIDDEN),
             nn.ReLU(),
-            nn.Linear(64, 1),
+            nn.Linear(D_VALUE_HIDDEN, 1),
             nn.Tanh(),
         )
 
         # Option embedding (type + card)
-        self.opt_type_embed = nn.Embedding(OPTION_TYPE_COUNT, 16)
+        self.opt_type_embed = nn.Embedding(OPTION_TYPE_COUNT, D_OPT_TYPE_EMBED)
         self.opt_card_embed = nn.Embedding(CARD_COUNT, D_EMBED, padding_idx=0)
-        self.opt_proj = nn.Linear(16 + D_EMBED, 64)
+        self.opt_proj = nn.Linear(D_OPT_TYPE_EMBED + D_EMBED, D_OPT_PROJ)
 
         # Action scorer
-        self.action_scorer = nn.Linear(TRUNK_DIM + 64, 1)
+        self.action_scorer = nn.Linear(TRUNK_DIM + D_OPT_PROJ, 1)
 
     def _encode_state(
         self,
@@ -109,6 +112,7 @@ class PolicyValueNet(nn.Module):
         opt_cards: torch.Tensor,     # [N] option card IDs
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (value [B,1], scores [N])."""
+        assert board.size(0) == 1, "PolicyValueNet.forward requires batch size 1"
         trunk = self._encode_state(board, hand_ids, discard_ids, deck_ids, scalars)
         value = self.value_head(trunk)  # [B, 1]
 
