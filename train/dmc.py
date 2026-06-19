@@ -256,6 +256,9 @@ def mcts_step(obs_dict: dict, your_deck: list[int], model: PolicyValueNet,
         root_sample.mcts_policy = [
             (c.node.visit / total_visits if c.node else 0.0) for c in root.children
         ]
+        # log π(a|s) at collection time — used by PPO importance-sampling ratio
+        p_selected = max(root_sample.mcts_policy[best_idx], 1e-8)
+        root_sample.log_prob_old = math.log(p_selected)
         root_sample.td_value = root.total / root.visit
 
         return best.action, root_sample
@@ -329,6 +332,7 @@ def self_play_game(
     obs = env.reset(deck, deck, your_index=0)
     samples_by_player: list[list[LearnSample]] = [[], []]
     done = False
+    _hand_cache: dict[int, list[int]] = {0: [], 1: []}
 
     while not done:
         sel = obs.get('select')
@@ -337,6 +341,10 @@ def self_play_game(
             continue
 
         your_index = obs['current']['yourIndex']
+
+        # Track acting player's hand for opponent oracle
+        acting_hand = obs['current']['players'][your_index].get('hand') or []
+        _hand_cache[your_index] = [c['id'] for c in acting_hand if c]
 
         if random.random() < epsilon:
             n_opts = len(sel['option'])
@@ -353,6 +361,7 @@ def self_play_game(
 
         obs, done, _ = env.step(action)
         if sample is not None:
+            sample.opp_hand_ids = _hand_cache[1 - your_index]
             samples_by_player[your_index].append(sample)
 
     env.close()
