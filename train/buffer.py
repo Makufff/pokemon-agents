@@ -1,6 +1,6 @@
 import random
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -17,6 +17,8 @@ class LearnSample:
     action_idx: int            # index of selected action
     td_value: float            # TD(λ) return
     mcts_policy: list[float]   # MCTS visit proportions per candidate action
+    log_prob_old: float = 0.0
+    opp_hand_ids: list[int] = field(default_factory=list)
 
 
 class RingBuffer:

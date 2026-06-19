@@ -38,3 +38,26 @@ def test_cannot_sample_more_than_stored():
     buf.push(_make_sample())
     with pytest.raises(ValueError):
         buf.sample(10)
+
+def test_phase2_fields_have_defaults():
+    s = LearnSample(
+        board=np.zeros((12, 40), dtype=np.float32),
+        hand_ids=[677], discard_ids=[], deck_ids=[6]*20,
+        scalars=np.zeros(8, dtype=np.float32),
+        opt_types=[7], opt_cards=[677],
+        action_idx=0, td_value=0.5, mcts_policy=[1.0],
+    )
+    assert s.log_prob_old == 0.0
+    assert s.opp_hand_ids == []
+
+def test_phase2_fields_store_correctly():
+    s = LearnSample(
+        board=np.zeros((12, 40), dtype=np.float32),
+        hand_ids=[677], discard_ids=[], deck_ids=[6]*20,
+        scalars=np.zeros(8, dtype=np.float32),
+        opt_types=[7], opt_cards=[677],
+        action_idx=0, td_value=0.5, mcts_policy=[1.0],
+        log_prob_old=-1.23, opp_hand_ids=[678, 1079],
+    )
+    assert s.log_prob_old == -1.23
+    assert s.opp_hand_ids == [678, 1079]
