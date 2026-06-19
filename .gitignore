@@ -1,5 +1,48 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+
+# Logs
 logs/
+
+# Archives / submissions
 *.tar.gz
+*.zip
+
+# Data files (large PDFs and CSVs)
+*.pdf
+EN_Card_Data.csv
+JP_Card_Data.csv
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
